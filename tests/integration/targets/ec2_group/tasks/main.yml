@@ -464,29 +464,54 @@
         that:
           - result.changed
 
-    # ============================================================
-    - name: add a rule that auto creates another security group
+    - name: Add a rule that auto creates another security group
       ec2_group:
-        name: '{{ec2_group_name}}'
-        description: '{{ec2_group_description}}'
+        name: "{{ ec2_group_name }}"
+        description: "{{ ec2_group_description }}"
         state: present
         purge_rules: no
         rules:
-        - proto: "tcp"
+        - proto: 'tcp'
           group_name: "{{ resource_prefix }} - Another security group"
           group_desc: Another security group
           ports: 7171
       register: result
 
-    - name: check that there are now two rules
+    - ec2_group_info:
+        filters:
+          group-name: "{{ ec2_group_name }}"
+      register: sg
+
+    - name: check security group
       assert:
         that:
           - result.changed
-          - result.warning is not defined
-          - result.ip_permissions|length == 2
-          - result.ip_permissions[0].user_id_group_pairs or
-            result.ip_permissions[1].user_id_group_pairs
-          - 'result.ip_permissions_egress[0].ip_protocol == "-1"'
+          - sg.security_groups | length == 1
+          - "{{ 7171 in sg.security_groups[0].ip_permissions | map(attribute='from_port') }}"
+
+    - name: Modify rule with different port
+      ec2_group:
+        name: "{{ ec2_group_name }}"
+        description: "{{ ec2_group_description }}"
+        state: present
+        rules:
+        - proto: 'tcp'
+          group_name: "{{ resource_prefix }} - Another security group"
+          ports: 7172
+      register: result
+
+    - ec2_group_info:
+        filters:
+          group-name: "{{ ec2_group_name }}"
+      register: sg_updated
+
+    - name: check that existing group was modified and no new one was created
+      assert:
+        that:
+          - sg_updated.security_groups | length == 1
+          - "{{ 7171 not in sg_updated.security_groups[0].ip_permissions | map(attribute='from_port') }}"
+          - "{{ 7172 in sg_updated.security_groups[0].ip_permissions | map(attribute='from_port') }}"
+          - sg_updated.security_groups[0].group_id == sg.security_groups[0].group_id
 
     # ============================================================
     - name: test ip rules convert port numbers from string to int (expected changed=true) (CHECK MODE)
